@@ -1,0 +1,6 @@
+---
+# Defaults var for zimbra installing
+timezone: "Europe/Moscow"
+zimbra_version: "8.8.15_GA_3953.RHEL8_64.20200629025823"
+install_dir: "/tmp/zcs-{{ zimbra_version }}"
+zimbra_download_url: "https://files.zimbra.com/downloads/8.8.15_GA/zcs-8.8.15_GA_3953.RHEL8_64.20200629025823.tgz"

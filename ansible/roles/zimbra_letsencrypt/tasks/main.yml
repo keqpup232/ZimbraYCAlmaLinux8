@@ -1,0 +1,173 @@
+---
+- name: Install certbot
+  dnf:
+    name: certbot
+    state: present
+
+- name: Stop zmproxyctl
+  command: /opt/zimbra/bin/zmproxyctl stop
+  become: yes
+  become_user: zimbra
+
+- name: Stop zmmailboxdctl
+  command: /opt/zimbra/bin/zmmailboxdctl stop
+  become: yes
+  become_user: zimbra
+
+- name: Get Zimbra hostname
+  command: /opt/zimbra/bin/zmhostname
+  register: zimbra_hostname
+  become: yes
+  become_user: zimbra
+  changed_when: false
+
+- name: Get system FQDN
+  command: hostname --fqdn
+  register: system_fqdn
+  changed_when: false
+
+- name: Check FQDN match
+  assert:
+    that: zimbra_hostname.stdout == system_fqdn.stdout
+    fail_msg: "Zimbra hostname and system FQDN do not match!"
+    success_msg: "Zimbra hostname and system FQDN match!"
+
+- name: Check CAA record
+  command: dig {{ system_fqdn.stdout.split('.')[-2:] | join('.') }} CAA +short
+  register: caa_record
+  changed_when: false
+
+- name: Check for CAA record for Let's Encrypt
+  assert:
+    that: '"letsencrypt.org" in caa_record.stdout'
+    fail_msg: "No CAA record found for Let's Encrypt"
+    success_msg: "CAA Record for Let's Encrypt Found"
+
+- name: Get Let's Encrypt Certificate
+  command: |
+    certbot certonly --standalone \
+      -d {{ system_fqdn.stdout }} \
+      --preferred-chain "{{ certbot_preferred_chain }}" \
+      --force-renewal \
+      --preferred-challenges http \
+      --agree-tos \
+      -n \
+      -m {{ email }} \
+      --keep-until-expiring \
+      --key-type rsa
+  register: certbot_result
+
+- name: Create a directory for certificates
+  file:
+    path: /opt/zimbra/ssl/letsencrypt
+    state: directory
+    owner: zimbra
+    group: zimbra
+    mode: 0755
+
+- name: Find the latest version of certificates
+  find:
+    paths: /etc/letsencrypt/archive/{{ system_fqdn.stdout }}
+    patterns: "*.pem"
+    file_type: file
+  register: cert_files
+
+- name: Copy certificates
+  copy:
+    src: "{{ item.path }}"
+    dest: "/opt/zimbra/ssl/letsencrypt/{{ item.path | basename | regex_replace('[0-9]+\\.pem', '.pem') }}"
+    remote_src: yes
+    owner: zimbra
+    group: zimbra
+  loop: "{{ cert_files.files }}"
+  when: "'letsencrypt' in item.path"
+
+- name: Download ISRG Root Certificate
+  get_url:
+    url: "{{ isrg_root_url }}"
+    dest: /tmp/ISRG-X1.pem
+    mode: 0644
+
+- name: Create Zimbra Certificate Chain
+  shell: |
+    cat /etc/letsencrypt/live/{{ system_fqdn.stdout }}/chain.pem > /opt/zimbra/ssl/letsencrypt/zimbra_chain.pem
+    cat /tmp/ISRG-X1.pem >> /opt/zimbra/ssl/letsencrypt/zimbra_chain.pem
+  args:
+    executable: /bin/bash
+
+- name: Verify certificates
+  command: /opt/zimbra/bin/zmcertmgr verifycrt comm /opt/zimbra/ssl/letsencrypt/privkey.pem /opt/zimbra/ssl/letsencrypt/cert.pem /opt/zimbra/ssl/letsencrypt/zimbra_chain.pem
+  become: yes
+  become_user: zimbra
+  register: cert_verification
+  changed_when: cert_verification.rc == 0
+
+- name: Create a backup of current certificates
+  shell: |
+    backup_dir="/opt/zimbra/ssl/zimbra.$(date '+%Y.%m.%d-%H.%M')" && \
+    cp -a /opt/zimbra/ssl/zimbra "$backup_dir"
+  args:
+    executable: /bin/bash
+  when: cert_verification.rc == 0
+
+- name: Copy private key
+  copy:
+    src: /opt/zimbra/ssl/letsencrypt/privkey.pem
+    dest: /opt/zimbra/ssl/zimbra/commercial/commercial.key
+    remote_src: yes
+    owner: zimbra
+    group: zimbra
+    mode: 0600
+  when: cert_verification.rc == 0
+
+- name: Install new certificates
+  command: /opt/zimbra/bin/zmcertmgr deploycrt comm /opt/zimbra/ssl/letsencrypt/cert.pem /opt/zimbra/ssl/letsencrypt/zimbra_chain.pem
+  become: yes
+  become_user: zimbra
+  when: cert_verification.rc == 0
+
+- name: Restart Zimbra and check status
+  block:
+    - name: Restart Zimbra (Attempt 1)
+      command: /opt/zimbra/bin/zmcontrol restart
+      become: yes
+      become_user: zimbra
+      register: zimbra_restart
+      ignore_errors: yes
+      changed_when: "'Running' not in zimbra_restart.stdout"
+
+    - name: Check status after first attempt
+      command: /opt/zimbra/bin/zmcontrol status
+      register: zimbra_status
+      become_user: zimbra
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Restart on error (attempt 2)
+      command: /opt/zimbra/bin/zmcontrol restart
+      become: yes
+      become_user: zimbra
+      register: zimbra_restart_retry
+      ignore_errors: yes
+      changed_when: "'Running' not in zimbra_restart_retry.stdout"
+      when: "'Running' not in zimbra_status.stdout"
+
+    - name: Final status check
+      command: /opt/zimbra/bin/zmcontrol status
+      register: final_zimbra_status
+      become_user: zimbra
+      ignore_errors: yes
+      changed_when: false
+  when: cert_verification.rc == 0
+
+- name: Show final status
+  debug:
+    msg: |
+      ╔══════════════════════════════════════════════╗
+      ║                Zimbra Services Status        ║
+      ╠══════════════════════════════════════════════╣
+      {% for line in zimbra_status.stdout_lines %}
+      ║ {{ (line | regex_replace('\t', '  ') | trim ).ljust(40) }}     ║
+      {% endfor %}
+      ╚══════════════════════════════════════════════╝
+  when: final_zimbra_status is defined

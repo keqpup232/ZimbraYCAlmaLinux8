@@ -1,0 +1,52 @@
+---
+- name: Installing EPEL repository
+  dnf:
+    name: epel-release
+    state: present
+
+- name: Install fail2ban
+  dnf:
+    name: fail2ban
+    state: present
+
+- name: Enabling and running fail2ban
+  service:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Creating a filter for Zimbra Web
+  template:
+    src: "zimbra-web.conf.j2"
+    dest: "/etc/fail2ban/filter.d/zimbra-web.conf"
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Creating a filter for Zimbra SMTP
+  template:
+    src: "zimbra-smtp.conf.j2"
+    dest: "/etc/fail2ban/filter.d/zimbra-smtp.conf"
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Creating a filter for Zimbra IMAP
+  template:
+    src: "zimbra-imap.conf.j2"
+    dest: "/etc/fail2ban/filter.d/zimbra-imap.conf"
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Setting jail for Zimbra
+  template:
+    src: "zimbra-jail.conf.j2"
+    dest: "/etc/fail2ban/jail.d/zimbra.conf"
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Checking fail2ban configuration
+  command: fail2ban-client -t
+  register: fail2ban_test
+  changed_when: false
+  failed_when: "fail2ban_test.rc != 0"
+
+- meta: flush_handlers

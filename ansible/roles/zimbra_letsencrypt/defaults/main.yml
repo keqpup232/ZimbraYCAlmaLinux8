@@ -1,0 +1,5 @@
+---
+# Defaults var of ssl letsencrypt
+email: "admin@{{ domain_name }}"
+certbot_preferred_chain: "ISRG Root X1"
+isrg_root_url: "https://letsencrypt.org/certs/isrgrootx1.pem.txt"

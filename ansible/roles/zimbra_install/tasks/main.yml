@@ -1,0 +1,203 @@
+---
+- name: Update system and install basic packages
+  dnf:
+    name:
+      - dnf-utils
+    state: present
+    update_cache: yes
+
+- name: Import EPEL GPG key
+  rpm_key:
+    state: present
+    key: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-8"
+
+- name: Install EPEL repository
+  dnf:
+    name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm"
+    state: present
+    disable_gpg_check: yes
+
+- name: Enable PowerTools
+  command: dnf config-manager --enable powertools
+
+- name: Update system and install basic packages
+  dnf:
+    name:
+      - bash-completion
+      - vim
+      - curl
+      - wget
+      - unzip
+      - openssh-clients
+      - telnet
+      - net-tools
+      - sysstat
+      - perl-core
+      - libaio
+      - nmap-ncat
+      - libstdc++.so.6
+      - bind-utils
+      - tar
+    state: present
+    update_cache: yes
+
+- name: Set hostname
+  hostname:
+    name: "{{ hostname }}"
+
+- name: Install chrony
+  dnf:
+    name: chrony
+    state: present
+
+- name: Configure timezone
+  timezone:
+    name: "{{ timezone }}"
+
+- name: Enable and start chronyd
+  service:
+    name: chronyd
+    enabled: yes
+    state: started
+
+- name: Set locale
+  shell: |
+    localectl set-locale LANG=en_US.UTF-8
+    localectl set-locale LANGUAGE=en_US
+    echo "export LC_ALL=en_US.UTF-8" >>~/.bashrc
+
+- name: Set locale zimbra user
+  shell: |
+    localectl set-locale LANG=en_US.UTF-8
+    localectl set-locale LANGUAGE=en_US
+    echo "export LC_ALL=en_US.UTF-8" >>~/.bashrc
+  become_user: zimbra
+
+- name: Create fake redhat-release file
+  copy:
+    dest: /etc/redhat-release
+    content: |
+      Red Hat Enterprise Linux Server release 8.0 (Ootpa)
+
+- name: Replace /etc/hosts
+  copy:
+    dest: /etc/hosts
+    content: |
+      127.0.0.1 localhost localhost.localdomain
+      {{ external_ip_address }} {{ hostname }} mail
+      {{ local_ip_address }} {{ hostname }} mail
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Download Zimbra
+  get_url:
+    url: "{{ zimbra_download_url }}"
+    dest: "/tmp/zcs-{{ zimbra_version }}.tgz"
+    mode: '0644'
+
+- name: Extract Zimbra
+  unarchive:
+    src: "/tmp/zcs-{{ zimbra_version }}.tgz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Configure answer file
+  template:
+    src: zimbra_answers.txt.j2
+    dest: /tmp/zimbra_answers.txt
+
+- name: Capture random chars 1 for mails
+  shell: date | md5sum | cut -c 1-9
+  register: zimbra_random_chars_1
+
+- name: wait 3 seconds
+  pause:
+    seconds: 3
+
+- name: Capture random chars 2 for passwd
+  shell: date | md5sum | cut -c 1-14
+  register: zimbra_random_chars_2
+
+- name: Capture mailboxd memory
+  shell: free -m | awk 'NR==2{printf "%.0f\n", $2*0.25 }'
+  register: zimbra_mailboxd_memory
+
+- name: Capture system memory
+  shell: free -h | awk 'NR==2{printf "%.0f\n", $2 }'
+  register: zimbra_system_memory
+
+- name: Create config for zmsetup.pl
+  template:
+    src: zimbra_config.txt.j2
+    dest: /tmp/zimbra_config.txt
+    mode: 0600
+
+- name: Launching the first stage install.sh+zimbra_answers.txt | sudo tail -f /tmp/install.log.*
+  shell: |
+    set -o pipefail
+    ./install.sh -s < /tmp/zimbra_answers.txt
+  args:
+    chdir: "{{ install_dir }}"
+  async: 600
+  poll: 30
+  register: phase1
+  ignore_errors: yes
+
+- name: Record the result of the first stage /var/log/zimbra_phase1.log or /tmp/install.log.*
+  copy:
+    content: |
+      Phase 1 installation result:
+      - Exit code: {{ phase1.rc }}
+      - Output: {{ phase1.stdout }}
+      - Errors: {{ phase1.stderr }}
+    dest: /var/log/zimbra_phase1.log
+
+- name: Launching the second stage zmsetup.pl+zimbra_config.txt | sudo tail -f /tmp/zmsetup.log
+  command: /opt/zimbra/libexec/zmsetup.pl -c /tmp/zimbra_config.txt
+  async: 900
+  poll: 30
+  register: phase2
+  ignore_errors: yes
+  when: phase1.rc == 0
+
+- name: Record the result of the second stage /var/log/zimbra_phase2.log or /tmp/zmsetup.log
+  copy:
+    content: |
+      Phase 2 configuration result:
+      - Exit code: {{ phase2.rc }}
+      - Output: {{ phase2.stdout }}
+      - Errors: {{ phase2.stderr }}
+    dest: /var/log/zimbra_phase2.log
+  when: phase1.rc == 0
+
+- name: Update mirrors.list for ClamAV
+  blockinfile:
+    path: /opt/zimbra/conf/freshclam.conf
+    block: |
+      DatabaseMirror db.ru.clamav.net
+      DatabaseMirror clamav.ihost.by
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - ClamAV mirrors"
+
+- name: Restart zmfreshclam
+  command: /opt/zimbra/bin/zmfreshclamctl restart
+  become_user: zimbra
+
+- name: Check Zimbra Status
+  command: /opt/zimbra/bin/zmcontrol status
+  register: zimbra_status
+  changed_when: false
+  become_user: zimbra
+  ignore_errors: yes
+
+- name: Show final status
+  debug:
+    msg: |
+      ╔══════════════════════════════════════════════╗
+      ║              Zimbra Services Stat            ║
+      ╠══════════════════════════════════════════════╣
+      {% for line in zimbra_status.stdout_lines %}
+      ║ {{ (line | regex_replace('\t', '  ') | trim ).ljust(40) }}     ║
+      {% endfor %}
+      ╚══════════════════════════════════════════════╝
+  when: zimbra_status is defined

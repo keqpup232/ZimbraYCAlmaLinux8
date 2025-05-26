@@ -1,0 +1,32 @@
+[zimbra-web]
+enabled = {{ zimbra_web_enabled | bool | lower }}
+port = {{ zimbra_web_port }}
+filter = zimbra-web
+logpath = /opt/zimbra/log/mailbox.log
+maxretry = {{ fail2ban_maxretry }}
+findtime = {{ fail2ban_findtime }}
+bantime = {{ fail2ban_bantime }}
+ignoreip = {{ fail2ban_ignore_ip }}
+
+[zimbra-smtp]
+enabled = {{ zimbra_smtp_enabled | bool | lower }}
+port = {{ zimbra_smtp_port }}
+filter = zimbra-smtp
+logpath = /opt/zimbra/log/mailbox.log
+maxretry = {{ fail2ban_maxretry }}
+findtime = {{ fail2ban_findtime }}
+bantime = {{ fail2ban_bantime }}
+ignoreip = {{ fail2ban_ignore_ip }}
+
+[zimbra-imap]
+enabled = {{ zimbra_imap_enabled | bool | lower }}
+port = {{ zimbra_imap_port }}
+filter = zimbra-imap
+logpath = /opt/zimbra/log/mailbox.log
+maxretry = {{ fail2ban_maxretry }}
+findtime = {{ fail2ban_findtime }}
+bantime = {{ fail2ban_bantime }}
+ignoreip = {{ fail2ban_ignore_ip }}
+
+[sshd]
+enabled = true

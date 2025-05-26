@@ -1,0 +1,11 @@
+---
+- name: Install and configure Zimbra + SSLetsencrypt + fail2ban
+  hosts: zimbra
+  become: yes
+  become_method: sudo
+  gather_facts: yes
+  # The order of performing roles:
+  roles:
+    - { role: zimbra_install, tags: ["zimbra"] } # First, install Zimbra
+    - { role: zimbra_letsencrypt, tags: ["letsencrypt"] } # Then we configure zimbra_letsencrypt
+    - { role: zimbra_fail2ban, tags: ["fail2ban"] } # Then we configure fail2ban

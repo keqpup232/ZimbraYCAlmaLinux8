@@ -66,12 +66,10 @@
     localectl set-locale LANGUAGE=en_US
     echo "export LC_ALL=en_US.UTF-8" >>~/.bashrc
 
-- name: Set locale zimbra user
+- name: Set LC_ALL for almalinux user
+  become: yes
   shell: |
-    localectl set-locale LANG=en_US.UTF-8
-    localectl set-locale LANGUAGE=en_US
-    echo "export LC_ALL=en_US.UTF-8" >>~/.bashrc
-  become_user: zimbra
+    sudo -u almalinux bash -c 'echo "export LC_ALL=en_US.UTF-8" >> ~almalinux/.bashrc'
 
 - name: Create fake redhat-release file
   copy:
@@ -95,6 +93,7 @@
     url: "{{ zimbra_download_url }}"
     dest: "/tmp/zcs-{{ zimbra_version }}.tgz"
     mode: '0644'
+    timeout: 500
 
 - name: Extract Zimbra
   unarchive:
@@ -139,7 +138,7 @@
     ./install.sh -s < /tmp/zimbra_answers.txt
   args:
     chdir: "{{ install_dir }}"
-  async: 600
+  async: 1000
   poll: 30
   register: phase1
   ignore_errors: yes
@@ -155,7 +154,7 @@
 
 - name: Launching the second stage zmsetup.pl+zimbra_config.txt | sudo tail -f /tmp/zmsetup.log
   command: /opt/zimbra/libexec/zmsetup.pl -c /tmp/zimbra_config.txt
-  async: 900
+  async: 2000
   poll: 30
   register: phase2
   ignore_errors: yes
@@ -170,6 +169,11 @@
       - Errors: {{ phase2.stderr }}
     dest: /var/log/zimbra_phase2.log
   when: phase1.rc == 0
+
+- name: Set LC_ALL for zimbra user
+  become: yes
+  shell: |
+    sudo -u zimbra bash -c 'echo "export LC_ALL=en_US.UTF-8" >> ~zimbra/.bashrc'
 
 - name: Update mirrors.list for ClamAV
   blockinfile:
@@ -201,3 +205,41 @@
       {% endfor %}
       ╚══════════════════════════════════════════════╝
   when: zimbra_status is defined
+
+- name: Check if DKIM key already exists
+  shell: su - zimbra -c "/opt/zimbra/libexec/zmdkimkeyutil -q -d {{ domain_name }}"
+  register: dkim_generate
+  ignore_errors: yes
+  changed_when: false
+
+- name: Generate DKIM key (new or force-update) {{ '-q' if dkim_generate.rc == 0 else '-a' }}
+  shell: su - zimbra -c "/opt/zimbra/libexec/zmdkimkeyutil {{ '-q' if dkim_generate.rc == 0 else '-a' }} -d {{ domain_name }}"
+  register: dkim_generate
+  ignore_errors: yes
+  changed_when: dkim_generate.rc == 0
+
+- name: Извлечь DKIM строки из stdout
+  set_fact:
+    dkim_parts: "{{ dkim_generate.stdout | regex_findall('\"(.*?)\"') }}"
+
+- name: Объединить DKIM части в одну строку
+  set_fact:
+    full_dkim_record: "mail._domainkey 600 TXT {{ dkim_parts[0] | trim | regex_replace('\\s+', '') }}\"\"{{ dkim_parts[1] }}\"\"{{ dkim_parts[2] }}"
+
+- name: Показать итоговую строку DKIM
+  debug:
+    var: full_dkim_record
+
+- name: Add DKIM record to Yandex DNS
+  command: >
+    yc dns zone add-records
+    --name {{ zimbra_dns_zone_name }}
+    --record "{{ full_dkim_record }}"
+  register: yc_command
+  delegate_to: localhost
+  become: false
+  changed_when: "'done' in yc_command.stdout"
+
+- name: Show result
+  ansible.builtin.debug:
+    var: yc_command.stdout

@@ -84,20 +84,28 @@ resource "yandex_dns_recordset" "zimbra_mx" {
   data    = ["0 mail.${var.domain_name}"]
 }
 
-resource "yandex_dns_recordset" "zimbra_mx1" {
-  zone_id = yandex_dns_zone.zimbra_zone.id
-  name    = "mail"
-  type    = "MX"
-  ttl     = 600
-  data    = ["0 mail.${var.domain_name}"]
-}
-
 resource "yandex_dns_recordset" "zimbra_caa" {
   zone_id = yandex_dns_zone.zimbra_zone.id
   name    = "@"
   type    = "CAA"
-  ttl     = 60
+  ttl     = 600
   data    = ["0 issue letsencrypt.org"]
+}
+
+resource "yandex_dns_recordset" "zimbra_spf" {
+  zone_id = yandex_dns_zone.zimbra_zone.id
+  name    = "@"
+  type    = "TXT"
+  ttl     = 600
+  data    = ["\"v=spf1 a mx ip4:${yandex_compute_instance.zimbra_server.network_interface.0.nat_ip_address} -all\""]
+}
+
+resource "yandex_dns_recordset" "zimbra_dmarc" {
+  zone_id = yandex_dns_zone.zimbra_zone.id
+  name    = "_dmarc"
+  type    = "TXT"
+  ttl     = 600
+  data    = ["\"v=DMARC1; p=quarantine; rua=mailto:admin@${var.domain_name}; ruf=mailto:admin@${var.domain_name}; fo=1\""]
 }
 
 resource "local_file" "ansible_inventory" {
@@ -114,6 +122,7 @@ resource "local_file" "ansible_inventory" {
     admin_password=${var.admin_password}
     local_ip_address=${yandex_compute_instance.zimbra_server.network_interface.0.ip_address}
     external_ip_address=${yandex_compute_instance.zimbra_server.network_interface.0.nat_ip_address}
+    zimbra_dns_zone_name=${yandex_dns_zone.zimbra_zone.name}
   EOT
 
   depends_on = [

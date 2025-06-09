@@ -1,0 +1,19 @@
+[Interface]
+PrivateKey = {{ key_client_private }}
+Address = 10.13.13.2/24
+DNS = 8.8.8.8
+PostUp = iptables -t mangle -A OUTPUT -p tcp --dport 25 -j MARK --set-mark 0x1
+PostUp = echo "100 vpnroute" >> /etc/iproute2/rt_tables
+PostUp = ip rule add fwmark 0x1 table vpnroute
+PostUp = ip route replace default via 10.13.13.1 dev wg0 table vpnroute
+PostUp = ip route replace {{ rout_public_ip }}/32 via 192.168.10.1 dev eth0
+PostDown = iptables -t mangle -D OUTPUT -p tcp --dport 25 -j MARK --set-mark 0x1 || true
+PostDown = ip rule del fwmark 0x1 table vpnroute || true
+PostDown = ip route del default via 10.13.13.1 dev wg0 table vpnroute || true
+PostDown = ip route del {{ rout_public_ip }}/32 via 192.168.10.1 dev eth0 || true
+PostDown = sed -i '/vpnroute/d' /etc/iproute2/rt_tables || true
+[Peer]
+PublicKey = {{ key_server_public }}
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = {{ rout_public_ip }}:51820
+PersistentKeepalive = 25

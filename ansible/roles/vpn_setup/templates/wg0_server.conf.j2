@@ -1,0 +1,21 @@
+[Interface]
+Address = 10.13.13.1/24
+PrivateKey = {{ key_server_private }}
+ListenPort = 51820
+PostUp = iptables -A FORWARD -i %i -j ACCEPT
+PostUp = iptables -A FORWARD -o %i -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o eth+ -j MASQUERADE
+PostUp = iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 25 -j DNAT --to-destination {{ external_ip_address }}:25
+PostUp = iptables -t nat -A POSTROUTING -p tcp -d {{ external_ip_address }} --dport 25 -j MASQUERADE
+PostUp = iptables -A FORWARD -p tcp -d {{ external_ip_address }} --dport 25 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -p tcp --dport 25 ! -d {{ external_ip_address }} -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT
+PostDown = iptables -D FORWARD -o %i -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o eth+ -j MASQUERADE
+PostDown = iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 25 -j DNAT --to-destination {{ external_ip_address }}:25 || true
+PostDown = iptables -t nat -D POSTROUTING -p tcp -d {{ external_ip_address }} --dport 25 -j MASQUERADE || true
+PostDown = iptables -D FORWARD -p tcp -d {{ external_ip_address }} --dport 25 -j ACCEPT || true
+PostDown = iptables -t nat -D POSTROUTING -p tcp --dport 25 ! -d {{ external_ip_address }} -j MASQUERADE || true
+[Peer]
+PublicKey = {{ key_client_public }}
+AllowedIPs = 10.13.13.2/32

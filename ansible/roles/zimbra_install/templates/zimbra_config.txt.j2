@@ -79,7 +79,7 @@ mailboxd_truststore_password="changeit"
 postfix_mail_owner="postfix"
 postfix_setgid_group="postdrop"
 ssl_default_digest="sha256"
-zimbraDNSMasterIP=""
+zimbraDNSMasterIP="8.8.8.8"
 zimbraDNSTCPUpstream="no"
 zimbraDNSUseTCP="yes"
 zimbraDNSUseUDP="yes"
@@ -93,7 +93,7 @@ zimbraMailProxy="TRUE"
 {% if ip_address.startswith('10.') or
       (ip_address.startswith('172.') and (ip_address.split('.')[1] | int) in range(16, 32)) or
       ip_address.startswith('192.168.') %}
-zimbraMtaMyNetworks="127.0.0.0/8 [::1]/128 {{ ip_address }}/{{ netmask }}"
+zimbraMtaMyNetworks="127.0.0.0/8 [::1]/128 {{ ip_address | regex_replace('\.\d+$', '.0') }}/24"
 {% else %}
 zimbraMtaMyNetworks="127.0.0.8 [::1]/128"
 {% endif %}

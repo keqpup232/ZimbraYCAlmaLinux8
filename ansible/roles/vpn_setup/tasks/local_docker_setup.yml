@@ -1,0 +1,43 @@
+---
+- name: Create WireGuard config directory
+  file:
+    path: ./config/wg_confs
+    state: directory
+  delegate_to: localhost
+  become: false
+
+- name: Generate server config
+  template:
+    src: wg0_server.conf.j2
+    dest: ./config/wg_confs/wg0.conf
+  vars:
+    key_server_private: "{{ lookup('file', './config/wg_keys/private_server.key') | trim }}"
+    key_client_public: "{{ lookup('file', './config/wg_keys/public_client.key') | trim }}"
+  delegate_to: localhost
+  become: false
+
+- name: Check if WireGuard container is running
+  command: docker-compose ps -q wireguard
+  args:
+    chdir: "{{ playbook_dir }}"
+  register: container_status
+  ignore_errors: yes
+  changed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: Stop and remove existing WireGuard container
+  command: docker-compose down
+  args:
+    chdir: "{{ playbook_dir }}"
+  when: container_status.stdout != ""
+  ignore_errors: yes
+  delegate_to: localhost
+  become: false
+
+- name: Start Docker container
+  command: docker-compose up -d
+  args:
+    chdir: "{{ playbook_dir }}"
+  delegate_to: localhost
+  become: false

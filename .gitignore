@@ -40,3 +40,4 @@ terraform.rc
 ### main
 /.idea
 /terraform/.terraform.lock.hcl
+/ansible/config/

@@ -135,7 +135,6 @@ export TF_VAR_yc_folder_id=$(yc config get folder-id)
      ```bash
      ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --tags "zimbra|letsencrypt|fail2ban"
      ```
-
 ---
 
 ## Cleanup
@@ -143,6 +142,79 @@ To destroy the infrastructure:
 ```bash
 terraform -chdir=./terraform destroy -auto-approve
 ```
+
+---
+## Bypassing Yandex Cloud's Outbound Port 25 Block
+
+**Important Notice**: This solution is specifically designed for **testing purposes only** to verify Zimbra mail server functionality when deployed in Yandex Cloud (YC). It is not recommended for production environments due to potential performance limitations and security considerations.
+
+The implementation establishes a WireGuard VPN tunnel between your YC instance and a local network with a static public IP address to bypass YC's outbound port 25 restrictions.
+
+## Limitations and Production Considerations
+
+1. **Testing Purpose Only**:
+   - This solution is designed specifically for testing Zimbra functionality
+   - Not recommended for production mail servers
+   - VPN tunnel may become a bottleneck for mail traffic
+
+2. **Production Alternatives**:
+   - Consider using YC's approved mail delivery services
+   - Implement a mail relay service outside of YC
+   - Use alternative ports with TLS encryption if supported
+   - Apply for YC's port 25 unblocking for legitimate mail servers
+
+3. **Performance Notes**:
+   - Tunnel bandwidth depends on your local internet connection
+   - Latency may affect mail delivery times
+   - Not suitable for high-volume mail traffic
+
+![Diagram](./tmp/schema.drawio)
+
+### Prerequisites
+
+Before installation, ensure you have:
+
+1. A static public IP address on your router
+2. The following ports forwarded from your router to your local machine:
+   - TCP 25 (for SMTP traffic)
+   - UDP 51820 (for WireGuard VPN)
+3. Docker and Docker Compose installed on your local machine
+   - [Installation guide](https://docs.docker.com/compose/install/)
+4. Need install `wireguard-tools` package on local machine (for key generation and management) 
+5. Zimbra installed via the provided Ansible [`playbook`](./ansible/playbook.yml)
+
+### Installation
+**Configuration**
+
+1. Edit the [`main.yml`](./ansible/roles/vpn_setup/vars/main.yml) configuration file:
+   ```yaml
+   rout_public_ip: "x.x.x.x"  # Replace with your actual static IP
+   ```
+
+**Deployment**
+
+Run the Ansible playbook to set up the VPN:
+
+```bash
+ansible-playbook -i ./ansible/inventory.ini ./ansible/vpn_setup.yml
+```
+
+**Verification**
+
+After installation y can see stdout ansible tests or:
+
+1. Verify the VPN connection is established
+   ```bash
+   sudo wg show
+   ```
+2. Test outbound SMTP traffic on port 25
+   ```bash
+   telnet your.mail.server 25
+   ```
+3. Confirm email delivery is functioning as expected
+    ```bash
+    tail -f /var/log/zimbra.log
+    ```
 
 ---
 
@@ -169,6 +241,13 @@ terraform -chdir=./terraform destroy -auto-approve
   - Zimbra Admin Console.
   - SMTP/IMAP login attempts.
 
+### **WireGuard VPN**  
+- Lightweight, high-performance VPN tunnel for bypassing YC’s port 25 restrictions:  
+  - **Protocol**: UDP (Port `51820` forwarded on home router).  
+  - **Encryption**: ChaCha20-Poly1305 for secure traffic forwarding.  
+  - **Key Management**: Ephemeral keys generated during Ansible setup.  
+  - **Traffic Routing**: Selective routing for SMTP (TCP/25) only.  
+  - **NAT Traversal**: Built-in support for home networks behind CG-NAT. 
 ---
 
 ## Notes

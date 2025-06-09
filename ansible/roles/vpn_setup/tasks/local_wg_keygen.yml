@@ -1,0 +1,72 @@
+---
+- name: Create WireGuard keys directory
+  file:
+    path: ./config/wg_keys
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Generate server private key
+  command: wg genkey
+  register: server_private_key
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Save server private key to file
+  copy:
+    content: "{{ server_private_key.stdout }}"
+    dest: ./config/wg_keys/private_server.key
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Generate server public key
+  command: wg pubkey
+  args:
+    stdin: "{{ server_private_key.stdout }}"
+  register: server_public_key
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Save server public key to file
+  copy:
+    content: "{{ server_public_key.stdout }}"
+    dest: ./config/wg_keys/public_server.key
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Generate client private key
+  command: wg genkey
+  register: client_private_key
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Save client private key to file
+  copy:
+    content: "{{ client_private_key.stdout }}"
+    dest: ./config/wg_keys/private_client.key
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Generate client public key
+  command: wg pubkey
+  args:
+    stdin: "{{ client_private_key.stdout }}"
+  register: client_public_key
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Save client public key to file
+  copy:
+    content: "{{ client_public_key.stdout }}"
+    dest: ./config/wg_keys/public_client.key
+    mode: '0600'
+  delegate_to: localhost
+  become: false

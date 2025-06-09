@@ -1,0 +1,15 @@
+---
+- include_tasks: local_dns_setup.yml
+  tags: dns
+
+- include_tasks: local_wg_keygen.yml
+  tags: keygen
+
+- include_tasks: remote_pack_install.yml
+  tags: pack
+
+- include_tasks: local_docker_setup.yml
+  tags: docker
+
+- include_tasks: remote_vpn_setup.yml
+  tags: vpn

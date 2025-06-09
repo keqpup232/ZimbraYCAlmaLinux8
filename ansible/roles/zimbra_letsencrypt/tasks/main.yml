@@ -126,39 +126,19 @@
   become_user: zimbra
   when: cert_verification.rc == 0
 
-- name: Restart Zimbra and check status
-  block:
-    - name: Restart Zimbra (Attempt 1)
-      command: /opt/zimbra/bin/zmcontrol restart
-      become: yes
-      become_user: zimbra
-      register: zimbra_restart
-      ignore_errors: yes
-      changed_when: "'Running' not in zimbra_restart.stdout"
+- name: Restart Zimbra
+  become: yes
+  shell: su - zimbra -c "/opt/zimbra/bin/zmcontrol restart"
+  async: 300
+  poll: 30
+  register: zimbra_restart
+  ignore_errors: yes
 
-    - name: Check status after first attempt
-      command: /opt/zimbra/bin/zmcontrol status
-      register: zimbra_status
-      become_user: zimbra
-      ignore_errors: yes
-      changed_when: false
-
-    - name: Restart on error (attempt 2)
-      command: /opt/zimbra/bin/zmcontrol restart
-      become: yes
-      become_user: zimbra
-      register: zimbra_restart_retry
-      ignore_errors: yes
-      changed_when: "'Running' not in zimbra_restart_retry.stdout"
-      when: "'Running' not in zimbra_status.stdout"
-
-    - name: Final status check
-      command: /opt/zimbra/bin/zmcontrol status
-      register: final_zimbra_status
-      become_user: zimbra
-      ignore_errors: yes
-      changed_when: false
-  when: cert_verification.rc == 0
+- name: Check status
+  command: /opt/zimbra/bin/zmcontrol status
+  register: zimbra_status
+  become_user: zimbra
+  ignore_errors: yes
 
 - name: Show final status
   debug:
@@ -170,4 +150,3 @@
       ║ {{ (line | regex_replace('\t', '  ') | trim ).ljust(40) }}     ║
       {% endfor %}
       ╚══════════════════════════════════════════════╝
-  when: final_zimbra_status is defined

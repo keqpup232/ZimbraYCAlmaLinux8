@@ -168,7 +168,7 @@ The implementation establishes a WireGuard VPN tunnel between your YC instance a
    - Latency may affect mail delivery times
    - Not suitable for high-volume mail traffic
 
-![Diagram](./tmp/schema.drawio)
+![Diagram](./tmp/schema.png)
 
 ### Prerequisites
 

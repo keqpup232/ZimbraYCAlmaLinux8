@@ -288,7 +288,7 @@ All components enforce HTTPS with:
 3. **Alertmanager**: `http://mt.yourdomain.com:9093/metrics`
 4. **Node-exporter**: `http://mt.yourdomain.com:9100/metrics`
 5. **Zimbra-exporter**: `http://mail.yourdomain.com:9095/metrics`
-5. 
+
 ### Accessing the Interfaces if secure: true 
 1. **Grafana**: `https://mt.yourdomain.com/`
 2. **Prometheus**: `https://mt.yourdomain.com/prometheus/metrics`

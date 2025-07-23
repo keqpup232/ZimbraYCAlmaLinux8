@@ -41,3 +41,4 @@ terraform.rc
 /.idea
 /terraform/.terraform.lock.hcl
 /ansible/config/
+/ansible/ssl/

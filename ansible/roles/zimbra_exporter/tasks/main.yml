@@ -1,0 +1,239 @@
+---
+- name: Install required packages for Zimbra Exporter
+  dnf:
+    name:
+      - gcc
+      - python3-devel
+    state: present
+
+- name: Install Python dependencies
+  pip:
+    name:
+      - flask
+      - prometheus_client
+      - psutil
+      - ipaddress
+    executable: pip3
+
+- name: Deploy Zimbra Exporter
+  template:
+    src: "{{ exporter_type }}.py"
+    dest: "/opt/zimbra_exporter.py"
+    mode: "0755"
+
+- name: Deploy zimbra_pflogsumm.pl
+  template:
+    src: "zimbra_pflogsumm.pl.j2"
+    dest: "/opt/zimbra_pflogsumm.pl"
+    mode: "0755"
+
+- name: Secure tasks
+  block:
+    - name: Modify TRUSTED_NETWORKS in zimbra_exporter.py
+      replace:
+        path: "/opt/zimbra_exporter.py"
+        regexp: "^TRUSTED_NETWORKS = .*$"
+        replace: >-
+          TRUSTED_NETWORKS = [
+          {% for ip in trusted_ip %}'{{ ip }}/32'
+          {% if not loop.last or monitoring_ip or local_ip_address or external_ip_address %}, {% endif %}
+          {% endfor %}
+          {% if local_ip_address %}'{{ local_ip_address }}/32'{% if monitoring_ip or external_ip_address %}, {% endif %}{% endif %}
+          {% if external_ip_address %}'{{ external_ip_address }}/32'{% if monitoring_ip %}, {% endif %}{% endif %}
+          {% if monitoring_ip %}'{{ monitoring_ip }}/32'{% endif %}
+          ]
+
+    - name: Check if SSL files exist LOCALLY
+      delegate_to: localhost
+      become: no
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: local_ssl_files
+      loop:
+        - "{{ playbook_dir }}/ssl/monitoring-client.key"
+        - "{{ playbook_dir }}/ssl/monitoring-client.crt"
+
+    - name: Set need_create_ssl flag
+      ansible.builtin.set_fact:
+        need_create_ssl: "{{ not (local_ssl_files.results[0].stat.exists and local_ssl_files.results[1].stat.exists) }}"
+
+    - name: Debug file existence
+      ansible.builtin.debug:
+        msg: |
+          Key exists: {{ local_ssl_files.results[0].stat.exists }}
+          Cert exists: {{ local_ssl_files.results[1].stat.exists }}
+          Need create SSL: {{ need_create_ssl }}
+
+    - name: Upload SSL files to server
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/ssl/{{ item }}"
+        dest: "{{ dir_ssl }}{{ item }}"
+        mode: "0600"
+      loop:
+        - "{{ ssl_key_name }}"
+        - "{{ ssl_cert_name }}"
+      when: not need_create_ssl | bool
+
+    - name: Modify SSL_CERT in zimbra_exporter.py
+      replace:
+        path: "/opt/zimbra_exporter.py"
+        regexp: "SSL_CERT = '.*?'"
+        replace: "SSL_CERT = '{{ dir_ssl }}{{ ssl_cert_name }}'"
+      when: not need_create_ssl | bool
+
+    - name: Modify SSL_KEY in zimbra_exporter.py
+      replace:
+        path: "/opt/zimbra_exporter.py"
+        regexp: "SSL_KEY = '.*?'"
+        replace: "SSL_KEY = '{{ dir_ssl }}{{ ssl_key_name }}'"
+      when: not need_create_ssl | bool
+
+    - name: Сertificate or key not found
+      pause:
+        seconds: 5
+        prompt: "❗️️Сertificate or key not found. Еemporary certificates will be generated❗️️"
+      when: not (local_ssl_files.results[0].stat.exists and local_ssl_files.results[1].stat.exists)
+
+    - name: Generate SSL certificate and key if exporterSecure is enabled
+      command: >
+        openssl req -x509 -newkey rsa:4096 -nodes
+        -out cert.pem -keyout key.pem -days 365
+        -subj "/CN=exporter"
+      args:
+        creates: cert.pem  # do not execute if file already exists
+      when: need_create_ssl | bool
+
+    - name: Modify PROMETHEUS_USER in zimbra_exporter.py
+      replace:
+        path: "/opt/zimbra_exporter.py"
+        regexp: "PROMETHEUS_USER = '.*?'"
+        replace: "PROMETHEUS_USER = '{{ prometheus_user }}'"
+
+    - name: Modify PROMETHEUS_PASSWORD in zimbra_exporter.py
+      replace:
+        path: "/opt/zimbra_exporter.py"
+        regexp: "PROMETHEUS_PASSWORD = '.*?'"
+        replace: "PROMETHEUS_PASSWORD = '{{ prometheus_pass }}'"
+
+  when: exporter_type == "exporterSecure"
+
+- name: Modify MAILSERVER in zimbra_exporter.py
+  replace:
+    path: "/opt/zimbra_exporter.py"
+    regexp: "MAILSERVER = '.*?'"
+    replace: "MAILSERVER = '{{ hostname_mail }}'"
+
+- name: Modify CACHE_TTL in zimbra_exporter.py
+  replace:
+    path: "/opt/zimbra_exporter.py"
+    regexp: '^CACHE_TTL = \d+'
+    replace: "CACHE_TTL = {{ cache_tll }}"
+
+- name: Modify PORT_EXPORTER in zimbra_exporter.py
+  replace:
+    path: "/opt/zimbra_exporter.py"
+    regexp: '^PORT_EXPORTER = \d+'
+    replace: 'PORT_EXPORTER = {{ zimbra_exporter_port }}'
+
+- name: Modify UPDATE_INTERVAL in zimbra_exporter.py
+  replace:
+    path: "/opt/zimbra_exporter.py"
+    regexp: '^UPDATE_INTERVAL = \d+'
+    replace: 'UPDATE_INTERVAL = {{ update_interval }}'
+
+- name: Deploy systemd service
+  template:
+    src: "zimbra_exporter.service.j2"
+    dest: "/etc/systemd/system/zimbra_exporter.service"
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start Zimbra Exporter
+  service:
+    name: zimbra_exporter
+    state: started
+    enabled: yes
+
+- name: Restart Zimbra Exporter
+  systemd:
+    name: zimbra_exporter
+    state: restarted
+    enabled: yes
+
+- name: wait 5 seconds
+  pause:
+    seconds: 5
+    prompt: "⏳ Wait 5 seconds (the exporter restart)..."
+
+- name: Verify Zimbra Exporter is running
+  block:
+    - name: Get Zimbra Exporter service status
+      ansible.builtin.command: systemctl is-active zimbra_exporter
+      register: zimbra_exporter_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get Zimbra Exporter enabled status
+      ansible.builtin.command: systemctl is-enabled zimbra_exporter
+      register: zimbra_exporter_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Show Zimbra Exporter status
+      ansible.builtin.debug:
+        msg: |
+          Zimbra Exporter SERVICE STATUS:
+          - State: {{ zimbra_exporter_status.stdout }}
+          - Autostart: {{ zimbra_exporter_enabled.stdout }}
+          - URL: http://{{ hostname_mail }}:{{ zimbra_exporter_port }}/metrics
+      when: exporter_type != "exporterSecure"
+
+    - name: Show Zimbra Exporter status
+      ansible.builtin.debug:
+        msg: |
+          Zimbra Exporter SERVICE STATUS:
+          - State: {{ zimbra_exporter_status.stdout }}
+          - Autostart: {{ zimbra_exporter_enabled.stdout }}
+          - URL: https://{{ hostname_mail }}:{{ zimbra_exporter_port }}/metrics
+      when: exporter_type == "exporterSecure"
+
+- name: zimbra_soap_session_max_idle_time
+  become: yes
+  shell: su - zimbra -c "zmlocalconfig -e zimbra_soap_session_max_idle_time=3600"
+  async: 300
+  poll: 30
+  ignore_errors: yes
+
+- name: zimbra_admin_soap_session_limit
+  become: yes
+  shell: su - zimbra -c "zmlocalconfig -e zimbra_admin_soap_session_limit=20"
+  async: 300
+  poll: 30
+  ignore_errors: yes
+
+- name: Restart Zimbra
+  become: yes
+  shell: su - zimbra -c "/opt/zimbra/bin/zmcontrol restart"
+  async: 300
+  poll: 30
+  register: zimbra_restart
+  ignore_errors: yes
+
+- name: Check status
+  command: /opt/zimbra/bin/zmcontrol status
+  register: zimbra_status
+  become_user: zimbra
+  ignore_errors: yes
+
+- name: Show final status
+  debug:
+    msg: |
+      ╔══════════════════════════════════════════════╗
+      ║                Zimbra Services Status        ║
+      ╠══════════════════════════════════════════════╣
+      {% for line in zimbra_status.stdout_lines %}
+      ║ {{ (line | regex_replace('\t', '  ') | trim ).ljust(40) }}     ║
+      {% endfor %}
+      ╚══════════════════════════════════════════════╝

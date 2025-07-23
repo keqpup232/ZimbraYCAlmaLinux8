@@ -1,0 +1,20 @@
+[zimbra]
+%{ if zimbra_ip != "" }${zimbra_ip}%{ endif }
+
+[monitoring]
+%{ if monitoring_ip != "" }${monitoring_ip}%{ endif }
+
+[all:vars]
+ansible_user=almalinux
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+domain_name=${domain}
+domain_l3_mail=${domain_l3_mail}
+domain_l3_mt=${domain_l3_mt}
+hostname_mail=%{ if domain_l3_mail != "" }${domain_l3_mail}.${domain}%{ endif }
+hostname_mt=%{ if domain_l3_mt != "" }${domain_l3_mt}.${domain}%{ endif }
+admin_password=${admin_password}
+local_ip_address=${local_ip_address}
+external_ip_address=${external_ip_address}
+zimbra_dns_zone_name=${zimbra_dns_zone_name}
+subnet=${subnet}
+monitoring_ip=%{ if monitoring_ip != "" }${monitoring_ip}%{ endif }

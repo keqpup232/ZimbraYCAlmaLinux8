@@ -1,0 +1,79 @@
+---
+- name: Download Node Exporter
+  get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+
+- name: Extract Node Exporter
+  unarchive:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Install Node Exporter binary
+  copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: "/usr/local/bin/node_exporter"
+    mode: "0755"
+    remote_src: yes
+
+- name: Deploy systemd service
+  template:
+    src: "systemd/node_exporter.service.j2"
+    dest: "/etc/systemd/system/node_exporter.service"
+
+- name: Set SELinux contexts
+  block:
+    - name: Set contexts for non-systemd files
+      sefcontext:
+        target: "{{ item.path }}"
+        setype: "{{ item.type }}"
+      loop:
+        - { path: '/usr/local/bin/node_exporter', type: 'bin_t' }
+
+    - name: Manually set context for systemd unit
+      command: chcon -t systemd_unit_file_t /etc/systemd/system/node_exporter.service
+      become: yes
+  when: ansible_selinux.status == 'enabled'
+
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start Node Exporter
+  service:
+    name: node_exporter
+    state: started
+    enabled: yes
+
+- name: Restart Node Exporter
+  systemd:
+    name: node_exporter
+    state: restarted
+    enabled: yes
+
+- name: wait 5 seconds
+  pause:
+    seconds: 5
+
+- name: Verify Node Exporter is running
+  block:
+    - name: Get Node Exporter service status
+      ansible.builtin.command: systemctl is-active node_exporter
+      register: node_exporter_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get Node Exporter enabled status
+      ansible.builtin.command: systemctl is-enabled node_exporter
+      register: node_exporter_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Show Node Exporter status
+      ansible.builtin.debug:
+        msg: |
+          Node Exporter SERVICE STATUS:
+          - State: {{ node_exporter_status.stdout }}
+          - Autostart: {{ node_exporter_enabled.stdout }}

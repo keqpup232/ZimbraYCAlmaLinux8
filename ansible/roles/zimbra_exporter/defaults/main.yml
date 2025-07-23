@@ -1,0 +1,19 @@
+---
+zimbra_exporter_port: "9095"
+cache_tll: "60" # for exporterRequest Cache time to save data
+update_interval: "60" # for exporterInterval and exporterSecure time to update data
+need_create_ssl: false # true -> for test if you dont have certs
+dir_ssl: "/home/almalinux/" # ssl dir
+ssl_cert_name: "monitoring-client.crt"
+ssl_key_name: "monitoring-client.key"
+prometheus_user: "admin" # BaseAuth
+prometheus_pass: "12345" # BaseAuth
+# trusted_ip only if you want your local machin
+trusted_ip:
+  - "10.10.10.10"
+  - "x.x.x.x"
+exporter_type: "exporterSecure"
+# exporterInterval   - open http exporter which gives data on Interval
+# exporterRequest    - open http exporter which gives data on Request
+# exporterSecure     - exporter secure TLS+BaseAuth+TrustedNetwork
+# zimbra_exporter    - exporter by Jason Cheng https://github.com/jasoncheng7115/zimbra_dashboards

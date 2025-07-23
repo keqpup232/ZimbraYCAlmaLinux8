@@ -1,0 +1,78 @@
+---
+- name: Include preinstall tasks
+  include_tasks: preinstall.yml
+  tags: preinstall
+
+- name: Include Prometheus tasks
+  include_tasks: prometheus.yml
+  tags: prometheus
+
+- name: Include Node Exporter tasks
+  include_tasks: node_exporter.yml
+  tags: node_exporter
+
+- name: Include Alertmanager tasks
+  include_tasks: alertmanager.yml
+  tags: alertmanager
+
+- name: Include Grafana tasks
+  include_tasks: grafana.yml
+  tags: grafana
+
+- name: wait 15 seconds
+  pause:
+    seconds: 15
+
+- name: Import Secure tasks
+  import_tasks: secure.yml
+  tags: secure
+  when: secure | bool
+
+- name: wait 15 seconds
+  pause:
+    seconds: 15
+
+- name: Check Prometheus status
+  command: systemctl is-active prometheus
+  register: prometheus_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Check Node Exporter status
+  command: systemctl is-active node_exporter
+  register: node_exporter_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Check Alertmanager status
+  command: systemctl is-active alertmanager
+  register: alertmanager_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Check Grafana status
+  command: systemctl is-active grafana-server
+  register: grafana_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Show services status
+  debug:
+    msg: |
+      ==== MONITORING SERVICES STATUS ====
+      Prometheus:      {{ prometheus_status.stdout | default('UNKNOWN') }} - http://{{ hostname_mt }}:{{ prometheus_port }}/metrics
+      Node Exporter:   {{ node_exporter_status.stdout | default('UNKNOWN') }} - http://{{ hostname_mt }}:{{ node_exporter_port }}/metrics
+      Alertmanager:    {{ alertmanager_status.stdout | default('UNKNOWN') }} - http://{{ hostname_mt }}:{{ alertmanager_port }}/metrics
+      Grafana:         {{ grafana_status.stdout | default('UNKNOWN') }} - http://{{ hostname_mt }}:{{ grafana_port }}  login: admin - pass: {{ grafana_admin_password }}
+  when: not secure | bool
+
+- name: Show services status
+  debug:
+    msg: |
+      ==== MONITORING SERVICES STATUS ====
+      Prometheus:      {{ prometheus_status.stdout | default('UNKNOWN') }} - https://{{ hostname_mt }}/prometheus/metrics
+      Node Exporter:   {{ node_exporter_status.stdout | default('UNKNOWN') }} - https://{{ hostname_mt }}/node-exporter/metrics
+      Alertmanager:    {{ alertmanager_status.stdout | default('UNKNOWN') }} - https://{{ hostname_mt }}/alertmanager/metrics
+      Grafana:         {{ grafana_status.stdout | default('UNKNOWN') }} - https://{{ hostname_mt }}/  login: admin - pass: {{ grafana_admin_password }}
+      BaseAuthLogin: {{ auth_basic_user }} - BaseAuthPass: {{ auth_basic_password }}
+  when: secure | bool

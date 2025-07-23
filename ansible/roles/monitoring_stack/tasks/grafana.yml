@@ -1,0 +1,128 @@
+---
+- name: Create Grafana user
+  user:
+    name: "{{ grafana_user }}"
+    system: yes
+    shell: /bin/false
+    create_home: no
+
+- name: Create Grafana directories
+  file:
+    path: /etc/grafana
+    state: directory
+    owner: "{{ grafana_user }}"
+    group: "users"
+
+- name: Download Grafana
+  get_url:
+    url: "https://dl.grafana.com/oss/release/grafana-{{ grafana_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/grafana-{{ grafana_version }}.linux-amd64.tar.gz"
+
+- name: Extract Grafana
+  unarchive:
+    src: "/tmp/grafana-{{ grafana_version }}.linux-amd64.tar.gz"
+    dest: "/etc/grafana"
+    remote_src: yes
+    extra_opts:
+      - "--strip-components=1"
+
+- name: Deploy datasources config
+  template:
+    src: "grafana/datasources.yml.j2"
+    dest: "/etc/grafana/conf/provisioning/datasources/datasources.yml"
+
+- name: Deploy systemd service
+  template:
+    src: "systemd/grafana-server.service.j2"
+    dest: "/etc/systemd/system/grafana-server.service"
+
+- name: Deploy Grafana dashboards
+  copy:
+    src: "{{ role_path }}/templates/grafana/{{ item }}"
+    dest: "/etc/grafana/conf/provisioning/dashboards/{{ item }}"
+    mode: "0644"
+  loop:
+    - "dashboards.yml"
+    - "node-exporter-full.json"
+    - "alertmanager-dashboard.json"
+    - "Zimbra_Grafana_Prometheus.json"
+    - "Alertmanager-Detailed.json"
+
+- name: Set admin password
+  ini_file:
+    path: /etc/grafana/conf/defaults.ini
+    section: security
+    option: admin_password
+    value: "{{ grafana_admin_password }}"
+    mode: 0640
+    owner: "{{ grafana_user }}"
+    group: "users"
+
+- name: Set server http_port
+  ini_file:
+    path: /etc/grafana/conf/defaults.ini
+    section: server
+    option: http_port
+    value: "{{ grafana_port }}"
+    mode: 0640
+    owner: "{{ grafana_user }}"
+    group: "users"
+
+- name: Set SELinux contexts
+  block:
+    - name: Set contexts for non-systemd files
+      sefcontext:
+        target: "{{ item.path }}"
+        setype: "{{ item.type }}"
+      loop:
+        - { path: '/etc/grafana/bin/grafana', type: 'bin_t' }
+        - { path: '/etc/grafana/bin/grafana-server', type: 'bin_t' }
+        - { path: '/etc/grafana(/.*)?', type: 'etc_t' }
+        - { path: '/etc/grafana(/.*)?', type: 'var_lib_t' }
+    - name: Apply new SELinux contexts
+      command: restorecon -Rv /etc/grafana
+    - name: Manually set context for systemd unit
+      command: chcon -t systemd_unit_file_t /etc/systemd/system/grafana-server.service
+      become: yes
+  when: ansible_selinux.status == 'enabled'
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start Grafana
+  service:
+    name: grafana-server
+    state: started
+    enabled: yes
+
+- name: Restart Grafana
+  systemd:
+    name: grafana-server
+    state: restarted
+    enabled: yes
+
+- name: wait 5 seconds
+  pause:
+    seconds: 5
+
+- name: Verify Grafana is running
+  block:
+    - name: Get Grafana service status
+      ansible.builtin.command: systemctl is-active grafana-server
+      register: grafana_server_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get Grafana enabled status
+      ansible.builtin.command: systemctl is-enabled grafana-server
+      register: grafana_server_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Show Grafana status
+      ansible.builtin.debug:
+        msg: |
+          Grafana SERVICE STATUS:
+          - State: {{ grafana_server_status.stdout }}
+          - Autostart: {{ grafana_server_enabled.stdout }}

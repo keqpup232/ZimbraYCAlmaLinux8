@@ -1,0 +1,13 @@
+groups:
+- name: example
+  rules:
+{% raw %}
+  - alert: HighCpuUsage
+    expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage on {{ $labels.instance }}"
+      description: "CPU usage is {{ $value }}%"
+{% endraw %}

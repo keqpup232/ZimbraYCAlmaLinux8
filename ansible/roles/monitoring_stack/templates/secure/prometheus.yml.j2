@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:{{ alertmanager_port }}']
+
+rule_files:
+  - "alert.rules.yml"
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:{{ prometheus_port }}"]
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['localhost:{{ alertmanager_port }}']
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:{{ node_exporter_port }}']
+  - job_name: 'zimbra'
+    scrape_interval: 70s
+    scrape_timeout: 45s
+    honor_labels: true
+    static_configs:
+      - targets: ['{{ hostname_mail }}:{{ zimbra_exporter_port }}']
+  - job_name: 'zimbra_secure'
+    scrape_interval: 70s
+    scrape_timeout: 45s
+    honor_labels: true
+    metrics_path: '/metrics'
+    scheme: https
+    basic_auth:
+      username: "{{ zimbra_exporter_user }}"
+      password: "{{ zimbra_exporter_pass }}"
+    tls_config:
+      ca_file: '/etc/ssl/ca/ca.crt'
+    static_configs:
+      - targets: ['{{ hostname_mail }}:{{ zimbra_exporter_port }}']

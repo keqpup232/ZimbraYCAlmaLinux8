@@ -43,7 +43,7 @@
 
 - name: Set hostname
   hostname:
-    name: "{{ hostname }}"
+    name: "{{ hostname_mail }}"
 
 - name: Install chrony
   dnf:
@@ -82,8 +82,8 @@
     dest: /etc/hosts
     content: |
       127.0.0.1 localhost localhost.localdomain
-      {{ external_ip_address }} {{ hostname }} mail
-      {{ local_ip_address }} {{ hostname }} mail
+      {{ external_ip_address }} {{ hostname_mail }} mail
+      {{ local_ip_address }} {{ hostname_mail }} mail
     owner: root
     group: root
     mode: '0644'
@@ -224,7 +224,7 @@
 
 - name: Объединить DKIM части в одну строку
   set_fact:
-    full_dkim_record: "mail._domainkey 600 TXT {{ dkim_parts[0] | trim | regex_replace('\\s+', '') }}\"\"{{ dkim_parts[1] }}\"\"{{ dkim_parts[2] }}"
+    full_dkim_record: "{{ domain_l3_mail }}._domainkey 600 TXT {{ dkim_parts[0] | trim | regex_replace('\\s+', '') }}\"\"{{ dkim_parts[1] }}\"\"{{ dkim_parts[2] }}"
 
 - name: Показать итоговую строку DKIM
   debug:

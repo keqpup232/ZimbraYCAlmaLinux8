@@ -1,0 +1,10 @@
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User={{ prometheus_user }}
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=0.0.0.0:{{ node_exporter_port }}
+
+[Install]
+WantedBy=multi-user.target

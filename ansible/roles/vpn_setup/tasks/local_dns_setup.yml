@@ -1,7 +1,7 @@
 ---
 - name: Update DNS record MX
   command: |
-    yc dns zone replace-records --name {{ zimbra_dns_zone_name }} --record "@ 600 MX 0 mx.keqpup.ru"
+    yc dns zone replace-records --name {{ zimbra_dns_zone_name }} --record "@ 600 MX 0 {{ domain_l3_mx }}.{{ domain_name }}"
   delegate_to: localhost
   become: false
 
@@ -13,6 +13,6 @@
 
 - name: ADD DNS record A home ip
   command: |
-    yc dns zone add-records --name {{ zimbra_dns_zone_name }} --record "mx 600 A {{ rout_public_ip }}"
+    yc dns zone add-records --name {{ zimbra_dns_zone_name }} --record "{{ domain_l3_mx }} 600 A {{ rout_public_ip }}"
   delegate_to: localhost
   become: false

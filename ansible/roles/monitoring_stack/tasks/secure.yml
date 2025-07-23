@@ -1,0 +1,381 @@
+---
+- name: Secure tasks
+  block:
+    - name: Install firewalld packages
+      dnf:
+        name:
+          - firewalld
+        state: present
+      tags: secure
+
+    - name: Enable and start firewalld
+      service:
+        name: firewalld
+        enabled: yes
+        state: started
+      tags: secure
+
+    - name: Configure firewalld security
+      block:
+        - name: Create monitoring zone
+          firewalld:
+            zone: monitoring
+            state: present
+            permanent: yes
+
+        - name: Add sources to monitoring zone default IPs
+          firewalld:
+            zone: monitoring
+            source: "{{ item }}"
+            permanent: yes
+            state: enabled
+          loop:
+            - "{{ external_ip_address }}/32"
+            - "{{ monitoring_ip }}/32"
+            - "{{ subnet }}"
+          when:
+            - item != "/32"
+
+        - name: Add sources to monitoring zone personal IP
+          firewalld:
+            zone: monitoring
+            source: "{{ item }}/32"
+            permanent: yes
+            state: enabled
+          loop: "{{ trusted_ip }}"
+          when:
+            - item != "/32"
+
+        - name: Add services to monitoring zone
+          firewalld:
+            zone: monitoring
+            service: "{{ item }}"
+            permanent: yes
+            state: enabled
+          loop:
+            - http
+            - https
+
+        - name: Remove dhcpv6-client from monitoring zone
+          firewalld:
+            zone: monitoring
+            service: dhcpv6-client
+            permanent: yes
+            state: disabled
+
+        - name: Remove http/https from public zone
+          firewalld:
+            zone: public
+            service: "{{ item }}"
+            permanent: yes
+            state: disabled
+          loop:
+            - http
+            - https
+
+        - name: Reject port 9090 in public zone permanently
+          ansible.posix.firewalld:
+            rich_rule: 'rule family=ipv4 port port=9090 protocol=tcp reject type=tcp-reset'
+            zone: public
+            state: enabled
+            permanent: yes
+
+        - name: Restart firewalld
+          systemd:
+            name: firewalld
+            state: restarted
+            enabled: yes
+
+    - name: Install openssl packages
+      dnf:
+        name:
+          - openssl
+        state: present
+
+    - name: Generate server and client certificate
+      block:
+        - name: Create SSL directories
+          file:
+            path: "/etc/ssl/{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - certs
+            - private
+            - ca
+
+        - name: Generate CA key
+          community.crypto.openssl_privatekey:
+            path: /etc/ssl/private/ca.key
+            size: 4096
+            mode: '0600'
+
+        - name: Generate CSR for CA
+          community.crypto.openssl_csr:
+            path: /etc/ssl/ca/ca.csr
+            privatekey_path: /etc/ssl/private/ca.key
+            common_name: "Monitoring CA"
+            basic_constraints:
+              - "CA:TRUE"
+            key_usage:
+              - "digitalSignature"
+              - "keyCertSign"
+              - "cRLSign"
+
+        - name: Generate self-signed certificate for CA
+          community.crypto.x509_certificate:
+            path: /etc/ssl/ca/ca.crt
+            privatekey_path: /etc/ssl/private/ca.key
+            csr_path: /etc/ssl/ca/ca.csr
+            provider: selfsigned
+            selfsigned_digest: sha256
+            selfsigned_not_after: "+3650d"
+            mode: '0644'
+
+        - name: Generate server key
+          community.crypto.openssl_privatekey:
+            path: "/etc/ssl/private/{{ hostname_mt }}.key"
+            size: 2048
+            mode: '0600'
+
+        - name: Generate server CSR
+          community.crypto.openssl_csr:
+            path: "/etc/ssl/certs/{{ hostname_mt }}.csr"
+            privatekey_path: "/etc/ssl/private/{{ hostname_mt }}.key"
+            digest: sha256
+            subject:
+              CN: "{{ hostname_mt }}"
+
+        - name: Generate server certificate using x509_certificate
+          community.crypto.x509_certificate:
+            path: "/etc/ssl/certs/{{ hostname_mt }}.crt"
+            csr_path: "/etc/ssl/certs/{{ hostname_mt }}.csr"
+            provider: ownca
+            ownca_path: /etc/ssl/ca/ca.crt
+            ownca_privatekey_path: /etc/ssl/private/ca.key
+            ownca_digest: sha256
+            ownca_not_after: "+365d"
+            mode: '0644'
+
+        - name: Generate client key
+          community.crypto.openssl_privatekey:
+            path: "/etc/ssl/private/{{ client_ssl_file_name }}.key"
+            size: 2048
+            mode: '0600'
+
+        - name: Generate CSR with SAN
+          openssl_csr:
+            path: "/etc/ssl/certs/{{ client_ssl_file_name }}.csr"
+            privatekey_path: "/etc/ssl/private/{{ client_ssl_file_name }}.key"
+            common_name: "{{ hostname_mail }}"
+            subject_alt_name: "DNS:{{ hostname_mail }}"
+            subject_alt_name_critical: no
+            country_name: "{{ country_name }}"
+            organization_name: "{{ organization_name }}"
+            organizational_unit_name: "{{ organizational_unit_name }}"
+            state_or_province_name: "{{ locality_name }}"
+            locality_name: "{{ locality_name }}"
+            basic_constraints_critical: no
+            key_usage:
+              - digitalSignature
+              - keyEncipherment
+            extended_key_usage:
+              - serverAuth
+
+        - name: Generate client certificate
+          community.crypto.x509_certificate:
+            path: "/etc/ssl/certs/{{ client_ssl_file_name }}.crt"
+            csr_path: "/etc/ssl/certs/{{ client_ssl_file_name }}.csr"
+            ownca_path: /etc/ssl/ca/ca.crt
+            ownca_privatekey_path: /etc/ssl/private/ca.key
+            provider: ownca
+            ownca_digest: sha256
+            ownca_not_after: +365d
+            mode: '0644'
+
+        - name: Generate client PKCS12
+          community.crypto.openssl_pkcs12:
+            action: export
+            path: "/etc/ssl/certs/{{ client_ssl_file_name }}.p12"
+            privatekey_path: "/etc/ssl/private/{{ client_ssl_file_name }}.key"
+            certificate_path: "/etc/ssl/certs/{{ client_ssl_file_name }}.crt"
+            friendly_name: "Monitoring Client Certificate"
+            state: present
+            passphrase: "{{ ssl_passphrase }}"
+
+        - name: fetch {{ client_ssl_file_name }}.p12
+          ansible.builtin.fetch:
+            src: /etc/ssl/certs/{{ client_ssl_file_name }}.p12
+            dest: ./ssl/
+            flat: yes
+            fail_on_missing: yes
+
+        - name: fetch {{ client_ssl_file_name }}.key
+          ansible.builtin.fetch:
+            src: /etc/ssl/private/{{ client_ssl_file_name }}.key
+            dest: ./ssl/
+            flat: yes
+            fail_on_missing: yes
+
+        - name: fetch {{ client_ssl_file_name }}.crt
+          ansible.builtin.fetch:
+            src: /etc/ssl/certs/{{ client_ssl_file_name }}.crt
+            dest: ./ssl/
+            flat: yes
+            fail_on_missing: yes
+
+        - name: fetch /etc/ssl/ca/ca.crt
+          ansible.builtin.fetch:
+            src: /etc/ssl/ca/ca.crt
+            dest: ./ssl/
+            flat: yes
+            fail_on_missing: yes
+
+    - name: Install NGINX packages
+      dnf:
+        name:
+          - nginx
+          - httpd-tools
+        state: present
+
+    - name: Install required Python library 'passlib'
+      pip:
+        name: passlib
+        executable: pip3
+
+    - name: Configure NGINX
+      block:
+        - name: Enable and start nginx
+          service:
+            name: nginx
+            enabled: yes
+            state: started
+
+        - name: Create htpasswd file
+          htpasswd:
+            path: /etc/nginx/htpasswd
+            name: "{{ auth_basic_user }}"
+            password: "{{ auth_basic_password }}"
+            state: present
+
+        - name: Deploy NGINX auth_maps.conf
+          template:
+            src: secure/auth_maps.conf.j2
+            dest: /etc/nginx/conf.d/auth_maps.conf
+            mode: 0644
+
+        - name: Deploy NGINX config
+          template:
+            src: secure/nginx_monitoring.conf.j2
+            dest: /etc/nginx/conf.d/monitoring.conf
+            mode: 0644
+
+        - name: Set SELinux boolean for httpd network connect
+          seboolean:
+            name: httpd_can_network_connect
+            state: yes
+            persistent: yes
+
+        - name: Test Nginx configuration
+          command: nginx -t
+          register: nginx_test
+          changed_when: false
+
+        - name: Reload Nginx if config is valid
+          systemd:
+            name: nginx
+            state: reloaded
+          when: nginx_test.rc == 0
+
+        - name: Show error if config invalid
+          debug:
+            msg: "Nginx config error: {{ nginx_test.stderr_lines }}"
+          when: nginx_test.rc != 0
+
+    - name: Install EPEL repository
+      dnf:
+        name:
+          - epel-release
+        state: present
+
+    - name: Install fail2ban
+      dnf:
+        name:
+          - fail2ban
+        state: present
+
+    - name: Configure fail2ban
+      block:
+        - name: Enable and start fail2ban
+          service:
+            name: fail2ban
+            enabled: yes
+            state: started
+
+        - name: Configure fail2ban grafana jail
+          template:
+            src: secure/grafana.local.j2
+            dest: /etc/fail2ban/jail.d/grafana.local
+            mode: 0644
+
+        - name: Configure fail2ban grafana.filter
+          template:
+            src: secure/grafana.conf.j2
+            dest: /etc/fail2ban/filter.d/grafana.conf
+            mode: 0644
+
+        - name: Add SELinux context for grafana logs
+          sefcontext:
+            target: "/etc/grafana/data/log(/.*)?"
+            setype: var_log_t
+            state: present
+            reload: yes
+
+        - name: Apply restorecon only if context changes
+          command: restorecon -Rv /etc/grafana/data/log
+          register: restorecon_output
+          changed_when: restorecon_output.stdout != ""
+
+        - name: Restart fail2ban
+          service:
+            name: fail2ban
+            state: restarted
+
+        - name: Deploy Prometheus_secure config
+          template:
+            src: "secure/prometheus.yml.j2"
+            dest: "/etc/prometheus/prometheus.yml"
+            owner: "{{ prometheus_user }}"
+            group: "{{ prometheus_user }}"
+
+        - name: Restart Prometheus
+          systemd:
+            name: prometheus
+            state: restarted
+            enabled: yes
+
+        - name: wait 5 seconds
+          pause:
+            seconds: 5
+
+        - name: Verify Prometheus is running
+          block:
+            - name: Get Prometheus service status
+              ansible.builtin.command: systemctl is-active prometheus
+              register: prometheus_status
+              ignore_errors: yes
+              changed_when: false
+
+            - name: Get Prometheus enabled status
+              ansible.builtin.command: systemctl is-enabled prometheus
+              register: prometheus_enabled
+              ignore_errors: yes
+              changed_when: false
+
+            - name: Show Prometheus status
+              ansible.builtin.debug:
+                msg: |
+                  Prometheus SERVICE STATUS:
+                  - State: {{ prometheus_status.stdout }}
+                  - Autostart: {{ prometheus_enabled.stdout }}
+  tags: secure

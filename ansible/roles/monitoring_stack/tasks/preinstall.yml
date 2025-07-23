@@ -1,0 +1,28 @@
+---
+- name: Install required packages
+  dnf:
+    name:
+      - bash-completion
+      - vim
+      - curl
+      - wget
+      - unzip
+      - openssh-clients
+      - telnet
+      - net-tools
+      - sysstat
+      - perl-core
+      - libaio
+      - nmap-ncat
+      - libstdc++.so.6
+      - bind-utils
+      - tar
+    state: present
+
+- name: Set timezone
+  timezone:
+    name: "{{ timezone }}"
+
+- name: Set hostname
+  hostname:
+    name: "{{ hostname_mt }}"

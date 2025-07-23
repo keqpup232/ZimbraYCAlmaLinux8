@@ -1,11 +1,18 @@
 ---
-- name: Install and configure Zimbra + SSLetsencrypt + fail2ban
+- name: Install and configure Zimbra + SSLetsencrypt + fail2ban + vpn_setup + exporter
   hosts: zimbra
   become: yes
   become_method: sudo
   gather_facts: yes
-  # The order of performing roles:
   roles:
-    - { role: zimbra_install, tags: ["zimbra"] } # First, install Zimbra
-    - { role: zimbra_letsencrypt, tags: ["letsencrypt"] } # Then we configure zimbra_letsencrypt
-    - { role: zimbra_fail2ban, tags: ["fail2ban"] } # Then we configure fail2ban
+    - { role: zimbra_install, tags: ["zimbra_install"] }
+    - { role: zimbra_letsencrypt, tags: ["zimbra_letsencrypt"] }
+    - { role: zimbra_fail2ban, tags: ["zimbra_fail2ban"] }
+    - { role: vpn_setup, tags: ["vpn_setup"] }
+    - { role: zimbra_exporter, tags: ["zimbra_exporter"] }
+
+- name: Deploy monitoring system
+  hosts: monitoring
+  become: yes
+  roles:
+    - { role: monitoring_stack, tags: ["monitoring_stack"] }

@@ -1,0 +1,21 @@
+{% raw %}
+{{ define "telegram.message" }}
+{{- if eq .Status "firing" -}}
+🔥 *[{{ .Status | toUpper }}]* {{ .CommonLabels.alertname }}
+{{ range .Alerts }}
+*Description:* {{ .Annotations.description }}
+*Summary:* {{ .Annotations.summary }}
+*Severity:* {{ .Labels.severity }}
+*Instance:* {{ .Labels.instance }}
+*Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+{{- end }}
+{{- else -}}
+✅ *[{{ .Status | toUpper }}]* {{ .CommonLabels.alertname }}
+{{ range .Alerts }}
+*Resolved:* {{ .Annotations.summary }}
+*Time:* {{ .EndsAt.Format "2006-01-02 15:04:05" }}
+*Duration:* {{ .EndsAt.Sub .StartsAt }}
+{{- end }}
+{{- end }}
+{{ end }}
+{% endraw %}

@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: 'Prometheus Dashboards'
+    folder: 'Prometheus'
+    type: file
+    options:
+      path: /etc/grafana/conf/provisioning/dashboards

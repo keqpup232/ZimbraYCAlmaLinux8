@@ -1,0 +1,123 @@
+---
+- name: Create Prometheus user
+  user:
+    name: "{{ prometheus_user }}"
+    system: yes
+    shell: /bin/false
+    create_home: no
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+  loop:
+    - /etc/prometheus
+    - /var/lib/prometheus/data
+
+- name: Download Prometheus
+  get_url:
+    url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+
+- name: Extract Prometheus
+  unarchive:
+    src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Install Prometheus binaries
+  copy:
+    src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: "0755"
+    remote_src: yes
+  loop:
+    - prometheus
+    - promtool
+
+- name: Deploy Prometheus config
+  template:
+    src: "prometheus/prometheus.yml.j2"
+    dest: "/etc/prometheus/prometheus.yml"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+
+- name: Deploy alert rules
+  template:
+    src: "prometheus/alert.rules.yml.j2"
+    dest: "/etc/prometheus/alert.rules.yml"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    trim_blocks: yes
+    lstrip_blocks: yes
+
+- name: Ensure no extra whitespace in rules file (fallback)
+  ansible.builtin.command: >
+    sed -i '/^[[:space:]]*$/d' /etc/prometheus/alert.rules.yml
+
+- name: Deploy systemd service
+  template:
+    src: "systemd/prometheus.service.j2"
+    dest: "/etc/systemd/system/prometheus.service"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Set SELinux contexts
+  block:
+    - name: Set contexts for non-systemd files
+      sefcontext:
+        target: "{{ item.path }}"
+        setype: "{{ item.type }}"
+      loop:
+        - { path: '/usr/local/bin/prometheus', type: 'bin_t' }
+        - { path: '/etc/prometheus(/.*)?', type: 'etc_t' }
+        - { path: '/var/lib/prometheus(/.*)?', type: 'var_lib_t' }
+
+    - name: Manually set context for systemd unit
+      command: chcon -t systemd_unit_file_t /etc/systemd/system/prometheus.service
+      become: yes
+  when: ansible_selinux.status == 'enabled'
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start Prometheus
+  service:
+    name: prometheus
+    state: started
+    enabled: yes
+
+- name: Restart Prometheus
+  systemd:
+    name: prometheus
+    state: restarted
+    enabled: yes
+
+- name: wait 5 seconds
+  pause:
+    seconds: 5
+
+- name: Verify Prometheus is running
+  block:
+    - name: Get Prometheus service status
+      ansible.builtin.command: systemctl is-active prometheus
+      register: prometheus_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get Prometheus enabled status
+      ansible.builtin.command: systemctl is-enabled prometheus
+      register: prometheus_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Show Prometheus status
+      ansible.builtin.debug:
+        msg: |
+          Prometheus SERVICE STATUS:
+          - State: {{ prometheus_status.stdout }}
+          - Autostart: {{ prometheus_enabled.stdout }}

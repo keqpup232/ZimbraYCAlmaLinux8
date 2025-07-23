@@ -1,0 +1,15 @@
+[Unit]
+Description=Alertmanager
+After=network.target
+
+[Service]
+User={{ prometheus_user }}
+Environment="TZ={{ timezone }}"
+ExecStart=/usr/local/bin/alertmanager \
+  --config.file=/etc/alertmanager/alertmanager.yml \
+  --storage.path=/var/lib/alertmanager/data/ \
+  --web.listen-address=0.0.0.0:{{ alertmanager_port }}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

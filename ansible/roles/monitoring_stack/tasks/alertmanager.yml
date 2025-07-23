@@ -1,0 +1,119 @@
+---
+- name: Download Alertmanager
+  get_url:
+    url: "https://github.com/prometheus/alertmanager/releases/download/v{{ alertmanager_version }}/alertmanager-{{ alertmanager_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/alertmanager-{{ alertmanager_version }}.linux-amd64.tar.gz"
+
+- name: Extract Alertmanager
+  unarchive:
+    src: "/tmp/alertmanager-{{ alertmanager_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Install Alertmanager binaries
+  copy:
+    src: "/tmp/alertmanager-{{ alertmanager_version }}.linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: "0755"
+    remote_src: yes
+  loop:
+    - alertmanager
+    - amtool
+
+- name: Create directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+  loop:
+    - /etc/alertmanager
+    - /var/lib/alertmanager/data
+
+- name: Deploy Alertmanager config
+  template:
+    src: "alertmanager/alertmanager.yml.j2"
+    dest: "/etc/alertmanager/alertmanager.yml"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    trim_blocks: yes
+    lstrip_blocks: yes
+
+- name: Ensure no extra whitespace in rules file (fallback)
+  ansible.builtin.command: >
+    sed -i '/^[[:space:]]*$/d' /etc/alertmanager/alertmanager.yml
+
+- name: Deploy Telegram template
+  template:
+    src: "alertmanager/telegram.tmpl.j2"
+    dest: "/etc/alertmanager/telegram.tmpl"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    trim_blocks: yes
+    lstrip_blocks: yes
+
+- name: Ensure no extra whitespace in rules file (fallback)
+  ansible.builtin.command: >
+    sed -i '/^[[:space:]]*$/d' /etc/alertmanager/telegram.tmpl
+
+- name: Deploy systemd service
+  template:
+    src: "systemd/alertmanager.service.j2"
+    dest: "/etc/systemd/system/alertmanager.service"
+
+- name: Set SELinux contexts
+  block:
+    - name: Set contexts for non-systemd files
+      sefcontext:
+        target: "{{ item.path }}"
+        setype: "{{ item.type }}"
+      loop:
+        - { path: '/usr/local/bin/alertmanager', type: 'bin_t' }
+        - { path: '/etc/alertmanager(/.*)?', type: 'etc_t' }
+        - { path: '/var/lib/alertmanager(/.*)?', type: 'var_lib_t' }
+
+    - name: Manually set context for systemd unit
+      command: chcon -t systemd_unit_file_t /etc/systemd/system/alertmanager.service
+      become: yes
+  when: ansible_selinux.status == 'enabled'
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start Alertmanager
+  service:
+    name: alertmanager
+    state: started
+    enabled: yes
+
+- name: Restart Alertmanager
+  systemd:
+    name: alertmanager
+    state: restarted
+    enabled: yes
+
+- name: wait 5 seconds
+  pause:
+    seconds: 5
+
+- name: Verify Alertmanager is running
+  block:
+    - name: Get Alertmanager service status
+      ansible.builtin.command: systemctl is-active alertmanager
+      register: alertmanager_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get Alertmanager enabled status
+      ansible.builtin.command: systemctl is-enabled alertmanager
+      register: alertmanager_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Show Alertmanager status
+      ansible.builtin.debug:
+        msg: |
+          Alertmanager SERVICE STATUS:
+          - State: {{ alertmanager_status.stdout }}
+          - Autostart: {{ alertmanager_enabled.stdout }}

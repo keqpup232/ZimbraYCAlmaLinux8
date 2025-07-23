@@ -1,0 +1,9 @@
+[grafana]
+enabled = true
+port = http,https
+filter = grafana
+logpath = /etc/grafana/data/log/grafana.log
+maxretry = 3
+bantime = 5m
+findtime = 2m
+banaction = iptables-multiport

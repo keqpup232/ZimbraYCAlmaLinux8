@@ -1,0 +1,47 @@
+---
+# timezone
+timezone: "Europe/Moscow"
+
+# Software versions
+prometheus_version: "3.4.1"
+node_exporter_version: "1.9.1"
+alertmanager_version: "0.28.1"
+grafana_version: "12.0.1"
+
+# Ports service
+prometheus_port: "9090"
+node_exporter_port: "9100"
+alertmanager_port: "9093"
+zimbra_exporter_port: "9095"
+grafana_port: "3000"
+
+# users
+prometheus_user: "prometheus" # for OS
+grafana_user: "grafana" # for OS
+grafana_admin_password: "qEV*zqm5%5Q~"
+
+# Telegram var for Alertmanager
+telegram_bot_token: "1111111111:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+telegram_chat_id: "-1111111111"
+
+
+# Secure: true -> if you want install TLS+BasicAuth+Fail2ban+TrustedNetwork
+secure: true
+# trusted_ip can be none, you can set your local ip or other who need to access
+trusted_ip:
+  - "10.10.10.10"
+  - "x.x.x.x"
+
+# Auth Configuration
+auth_basic_user: "admin"
+auth_basic_password: "12345"
+ssl_passphrase: "54321"
+zimbra_exporter_user: "admin"
+zimbra_exporter_pass: "12345"
+
+# SSL
+country_name: "RU"
+organization_name: "My Organization"
+organizational_unit_name: "IT Department"
+locality_name: "Moscow"
+client_ssl_file_name: "monitoring-client"

@@ -1,1 +1,2 @@
 rout_public_ip: "x.x.x.x"
+domain_l3_mx: "mx"

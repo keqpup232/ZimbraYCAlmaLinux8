@@ -1,12 +1,15 @@
-# Zimbra Mail Server Deployment on Yandex Cloud
+# Zimbra Mail Server and Monitoring Stack Deployment on Yandex Cloud
 
 ## Overview  
-This guide provides step-by-step instructions for deploying a **Zimbra 8.8.15** mail server on **AlmaLinux 8** using **Terraform** and **Ansible** in **Yandex Cloud**. The stack includes:  
+This guide provides step-by-step instructions for deploying a **Zimbra 8.8.15** mail server and **monitoring stack** on **AlmaLinux 8** using **Terraform** and **Ansible** in **Yandex Cloud**. The stack includes:  
 
-- **AlmaLinux 8** – A stable and secure RHEL-based OS.  
-- **Zimbra 8.8.15** – Open-source email and collaboration platform.  
-- **Let’s Encrypt** – Free SSL certificates for secure mail services.  
-- **Fail2Ban** – Protection against brute-force attacks.  
+- **AlmaLinux 8** – A stable and secure RHEL-based OS  
+- **Zimbra 8.8.15** – Open-source email and collaboration platform  
+- **Monitoring Stack** – Prometheus, Grafana, Alertmanager with custom Zimbra exporter  
+- **Let's Encrypt** – Free SSL certificates for secure services  
+- **Fail2Ban** – Protection against brute-force attacks  
+- **WireGuard VPN** – Solution for bypassing Yandex Cloud's SMTP restrictions  
+- **Security** – TLS encryption, Basic Auth, and IP-based access control  
 
 ---
 
@@ -69,38 +72,86 @@ curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
 
 ## Installation
 
-### 1. Configure Required Variables
+### 1 Configure Required Variables
 Edit the file [`variables.tf`](./terraform/variables.tf) with the following parameters:
 ```hcl
-variable "domain_name" {
+variable "domain" {
   description = "Domain name for Zimbra"
   type        = string
-  default     = "example.com"  # Replace with your domain
+  default     = "example.com"
 }
-
-variable "cores" {
-  description = "CPU cores for the VM"
-  type        = number
-  default     = 4
+variable "domain_l3_mail" {
+  description = "Domain l3 mail server"
+  type        = string
+  default     = "mail"
 }
-
-variable "memory" {
-  description = "Memory for the VM (in GB)"
-  type        = number
-  default     = 12   # Minimum 8 GB RAM for Zimbra
+variable "domain_l3_mt" {
+  description = "Domain l3 monitoring server"
+  type        = string
+  default     = "mt"
 }
-
-variable "size" {
-  description = "Disk size for the VM (in GB)"
-  type        = number
-  default     = 100
-}
-
 variable "admin_password" {
   description = "Admin password for Zimbra"
   type        = string
   default     = "YourSecurePassword123!"  # Replace with a strong password
 }
+variable "deploy_zimbra" {
+  type        = bool
+  default     = true
+  description = "Deploy Zimbra server" # True-> If you need deploy zimbra VM
+}
+variable "deploy_monitoring" {
+  type        = bool
+  default     = true
+  description = "Deploy monitoring server" # True-> If you need deploy monitoring VM
+}
+```
+
+Edit the file [`monitoring_stack/defaults`](./ansible/roles/monitoring_stack/defaults/main.yml) with the following parameters:
+```yaml
+# Telegram var for Alertmanager
+telegram_bot_token: "1111111111:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+telegram_chat_id: "-1111111111"
+# Secure: true -> if you want install TLS+BasicAuth+Fail2ban+TrustedNetwork
+secure: true
+# trusted_ip can be none, you can set your local ip or other who need to access
+trusted_ip:
+  - "x.x.x.x"
+  - "x.x.x.x"
+# Auth Configuration
+auth_basic_user: "admin"
+auth_basic_password: "12345"
+ssl_passphrase: "54321"
+zimbra_exporter_user: "admin"
+zimbra_exporter_pass: "12345"
+# SSL
+country_name: "RU"
+organization_name: "My Organization"
+organizational_unit_name: "IT Department"
+locality_name: "Moscow"
+client_ssl_file_name: "monitoring-client"
+```
+
+Edit the file [`zimbra_exporter/defaults`](./ansible/roles/zimbra_exporter/defaults/main.yml) with the following parameters:
+```yaml
+zimbra_exporter_port: "9095"
+cache_tll: "60" # for exporterRequest Cache time to save data
+update_interval: "60" # for exporterInterval and exporterSecure time to update data
+need_create_ssl: false # true -> for test if you dont have certs
+dir_ssl: "/home/almalinux/" # ssl dir
+ssl_cert_name: "monitoring-client.crt"
+ssl_key_name: "monitoring-client.key"
+prometheus_user: "admin" # BaseAuth
+prometheus_pass: "12345" # BaseAuth
+# trusted_ip only if you want your local machin
+trusted_ip:
+  - "x.x.x.x"
+  - "x.x.x.x"
+exporter_type: "exporterSecure"
+# exporterInterval   - open http exporter which gives data on Interval
+# exporterRequest    - open http exporter which gives data on Request
+# exporterSecure     - exporter secure TLS+BaseAuth+TrustedNetwork
+# zimbra_exporter    - exporter by Jason Cheng
 ```
 
 ### 2. Set Environment Variables
@@ -123,17 +174,27 @@ export TF_VAR_yc_folder_id=$(yc config get folder-id)
    ```
 
 3. **Run Ansible Playbook**:
+   - To run specific roles (recommended install):
+     ```bash
+     ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --tags "zimbra_install,zimbra_letsencrypt,zimbra_exporter,monitoring_stack"
+     ```
    - For a full installation:
      ```bash
-     ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml
+     ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --list-tags
      ```
    - To start from a specific task:
      ```bash
      ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --start-at-task="Update mirrors.list for ClamAV"
      ```
-   - To run specific roles (Zimbra, Let’s Encrypt, Fail2Ban):
+   - All tags
      ```bash
-     ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --tags "zimbra|letsencrypt|fail2ban"
+     ansible-playbook -i ./ansible/inventory.ini ./ansible/playbook.yml --list-tags
+     
+     play #1 (zimbra): Install and configure Zimbra + SSLetsencrypt + fail2ban + vpn_setup + exporter      TAGS: []
+     TASK TAGS: [dns, docker, keygen, pack, vpn, vpn_setup, zimbra_exporter, zimbra_fail2ban, zimbra_install, zimbra_letsencrypt]
+
+     play #2 (monitoring): Deploy monitoring system        TAGS: []
+     TASK TAGS: [alertmanager, grafana, monitoring_stack, node_exporter, preinstall, prometheus, secure]
      ```
 ---
 
@@ -141,6 +202,107 @@ export TF_VAR_yc_folder_id=$(yc config get folder-id)
 To destroy the infrastructure:
 ```bash
 terraform -chdir=./terraform destroy -auto-approve
+```
+
+
+# Description of services
+
+## Monitoring Stack Architecture
+
+### Custom Zimbra Exporter
+The deployment includes a specialized Zimbra exporter with multiple operation modes:
+
+1. **exporterSecure** (Recommended for production):
+   - TLS encryption with client certificate authentication
+   - HTTP Basic Authentication
+   - IP whitelisting (trusted networks only)
+   - Auto-updates metrics at fixed intervals
+
+2. **exporterInterval**:
+   - Open HTTP endpoint
+   - Auto-updates metrics at fixed intervals
+   - Suitable for internal monitoring
+
+3. **exporterRequest**:
+   - On-demand metric generation
+   - No caching, fresh data on each request
+
+4. **[Jason Cheng's Exporter](https://github.com/jasoncheng7115/zimbra_dashboards)**:
+   - Compatibility mode with standard zimbra_dashboards
+   - Uses Zimbra's native admin APIs
+
+### Integrated Components
+- **Prometheus**:
+  - Scrapes metrics from zimbra_exporter and node_exporter
+  - Stores time-series data with configurable retention
+  - Pre-configured alert rules for Zimbra services
+
+- **Grafana**:
+  - Pre-loaded Zimbra dashboard (based on [Jason Cheng's](https://github.com/jasoncheng7115/zimbra_dashboards) design)
+  - Custom dashboards for server health monitoring
+  - Secure access via TLS+Basic Auth
+
+- **Alertmanager**:
+  - Integrated with Telegram notifications
+  - Dedicated alerts for:
+    - Zimbra service outages
+    - Disk space thresholds
+    - Failed login attempts
+    - Certificate expiration
+
+- **Node Exporter**:
+  - System-level metrics collection
+  - CPU, memory, disk, and network monitoring
+
+---
+
+## Security Implementation
+
+### 1. Transport Layer Security (TLS)
+All components enforce HTTPS with:
+- Auto-generated self-signed certificates during deployment
+- Option to replace with Let's Encrypt certificates
+- Strict TLS 1.2+ configuration
+- Certificate pinning for internal services
+
+### 2. Authentication
+- **Basic Auth** for all web interfaces (Grafana, Prometheus, Alertmanager)
+- Separate credential sets for:
+  - Admin users (full access)
+  - Read-only users (monitoring only)
+- Password hashing with bcrypt
+
+### 3. Network Security
+- **IP Whitelisting** for sensitive endpoints:
+  ```yaml
+  trusted_ip:
+    - "x.x.x.x"  # Admin workstation
+    - "x.x.x.x"  # Backup server
+  ```
+  
+## Monitoring Stack Configuration
+
+### Accessing the Interfaces if secure: false 
+1. **Grafana**: `http://mt.yourdomain.com:3000`
+2. **Prometheus**: `http://mt.yourdomain.com:9090/metrics`
+3. **Alertmanager**: `http://mt.yourdomain.com:9093/metrics`
+4. **Node-exporter**: `http://mt.yourdomain.com:9100/metrics`
+5. **Zimbra-exporter**: `http://mail.yourdomain.com:9095/metrics`
+5. 
+### Accessing the Interfaces if secure: true 
+1. **Grafana**: `https://mt.yourdomain.com/`
+2. **Prometheus**: `https://mt.yourdomain.com/prometheus/metrics`
+3. **Alertmanager**: `https://mt.yourdomain.com/alertmanager/metrics`
+4. **Node-exporter**: `https://mt.yourdomain.com/node-exporter/metrics`
+5. **Zimbra-exporter**: `https://mail.yourdomain.com:9095/metrics`
+
+### Useful Commands
+Check exporter status:
+```bash
+sudo journalctl -u zimbra_exporter.service -f
+tail -f /var/log/zimbra_exporter.log
+sudo systemctl restart zimbra_exporter
+sudo systemctl status zimbra_exporter
 ```
 
 ---
@@ -168,6 +330,13 @@ The implementation establishes a WireGuard VPN tunnel between your YC instance a
    - Latency may affect mail delivery times
    - Not suitable for high-volume mail traffic
 
+### Architecture
+```mermaid
+graph LR
+    YC_Instance -->|WireGuard| Home_Router
+    Home_Router -->|Port Forwarding| Local_Server
+    Local_Server --> Internet[SMTP Port 25]
+```
 ![Diagram](./tmp/schema.png)
 
 ### Prerequisites
@@ -248,6 +417,55 @@ After installation y can see stdout ansible tests or:
   - **Key Management**: Ephemeral keys generated during Ansible setup.  
   - **Traffic Routing**: Selective routing for SMTP (TCP/25) only.  
   - **NAT Traversal**: Built-in support for home networks behind CG-NAT. 
+
+### **Custom Zimbra Exporter**
+- Multi-mode monitoring agent for Zimbra metrics:
+  - **Secure Mode**: TLS+BasicAuth+IP whitelisting
+  - **Interval Mode**: Auto-refreshing metrics cache
+  - **Request Mode**: On-demand metric generation
+- Pre-configured dashboards compatible with [Jason Cheng's](https://github.com/jasoncheng7115/zimbra_dashboards) templates
+- Logging to `/var/log/zimbra_exporter.log`
+
+### **Prometheus**
+- Metrics collection with scrape intervals
+- Pre-configured alerts for:
+  - Zimbra service status
+  - Queue lengths
+  - LDAP replication health
+- Secure endpoint with Basic Auth
+
+### **Grafana**
+- Pre-loaded dashboards:
+  - Zimbra Cluster Overview
+  - Mail Queue Monitoring
+  - System Resources
+- Auto-configured Prometheus datasource
+
+### **Alertmanager**
+- Telegram integration with templated alerts
+- Dedicated routing for:
+  - Critical (24/7 notifications)
+  - Warnings (business hours only)
+- Silence management via web UI
+
+### **Node Exporter**
+- System-level metrics collection:
+  - Disk I/O for `/opt/zimbra`
+  - Zimbra process memory usage
+  - Network throughput per interface
+- Filtered to exclude sensitive kernel metrics
+
+### **Security Layer**
+- **TLS Everywhere**:
+  - Auto-generated certs with 398-day validity
+  - Strict cipher suite policies
+- **Trusted Networks**:
+  - Dual-level IP whitelisting (instance+application)
+  - Fail2Ban integration for brute force protection
+- **Auth Framework**:
+  - Role-based access control
+  - Credential encryption in configs
+  - Session invalidation on IP change
 ---
 
 ## Notes
